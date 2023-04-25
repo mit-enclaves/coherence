@@ -117,6 +117,8 @@ typedef union tagged {
     type wayT,
     type cRqIdxT
 ) deriving (Bits, Eq, FShow);
+    
+typedef 64 DramRegionNum;
 
 module mkLLPipe(
     LLPipe#(lgBankNum, childNum, wayNum, indexT, tagT, cRqIdxT)
@@ -157,6 +159,16 @@ module mkLLPipe(
     Reg#(Bool) initDone <- mkReg(False);
     Reg#(indexT) initIndex <- mkReg(0);
 
+`ifdef SECURITY
+    //Vector#(DramRegionNum, Reg#(Tuple2#(Bit#(TLog#(indexSz)), indexT))) configRegionL2 <-replicateM(mkReg(0));
+    
+    // Something to try:
+    Vector#(DramRegionNum, Reg#(Tuple2#(Bit#(TLog#(indexSz)), indexT))) configRegionL2;
+    for (Integer i = 0; i < valueof(DramRegionNum); i = i + 1) begin 
+        configRegionL2[i] <- mkReg(tuple2('h4, fromInteger(i * 16)));
+    end
+`endif // SECURITY
+ 
     rule doInit(!initDone);
         for(Integer i = 0; i < valueOf(wayNum); i = i+1) begin
             infoRam[i].wrReq(initIndex, CacheInfo {
@@ -185,8 +197,20 @@ module mkLLPipe(
     endfunction
 
     function indexT getIndex(pipeCmdT cmd);
-        Addr a = getAddrFromCmd(cmd);
-        return truncate(a >> (valueOf(LgLineSzBytes) + valueOf(lgBankNum)));
+        Addr addr = getAddrFromCmd(cmd);
+        indexT index = truncate(addr >> (valueOf(LgLineSzBytes) + valueOf(lgBankNum)));
+    `ifdef SECURITY
+        // Get the DRAM region ID and get the L2 slice base and bound for the corresponding DRAM region
+        Bit#(6) region = truncateLSB(addr);
+        let cR = configRegionL2[region];
+        let log_size = tpl_1(cR);
+        let base = tpl_2(cR);
+
+        indexT mask = -1 >> (fromInteger(valueOf(indexSz)) - log_size);
+        index = (index & mask) + base;
+    `endif // SECURITY
+        return index;
+
     endfunction
 
     function ActionValue#(tagMatchResT) tagMatch(
