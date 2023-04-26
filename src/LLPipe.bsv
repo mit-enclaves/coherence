@@ -118,7 +118,9 @@ typedef union tagged {
     type cRqIdxT
 ) deriving (Bits, Eq, FShow);
     
+typedef 6  LgDramRegionNum; // 64 regions
 typedef 64 DramRegionNum;
+typedef 25 LgDramRegionSz;  // 32MB regions
 
 module mkLLPipe(
     LLPipe#(lgBankNum, childNum, wayNum, indexT, tagT, cRqIdxT)
@@ -201,7 +203,7 @@ module mkLLPipe(
         indexT index = truncate(addr >> (valueOf(LgLineSzBytes) + valueOf(lgBankNum)));
     `ifdef SECURITY
         // Get the DRAM region ID and get the L2 slice base and bound for the corresponding DRAM region
-        Bit#(6) region = truncateLSB(addr);
+        Bit#(LgDramRegionNum) region = truncate(addr >> valueOf(LgDramRegionSz));
         let cR = configRegionL2[region];
         let log_size = tpl_1(cR);
         let base = tpl_2(cR);
