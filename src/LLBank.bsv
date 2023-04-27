@@ -490,7 +490,8 @@ module mkLLBank#(
             addr: cRq.addr,
             toState: cRq.toState == M ? M : E, // set upgrade state
             data: respData,
-            way: cSlot.way
+            way: cSlot.way,
+            child:  cRq.child
         }));
         $display("%t LL %m mRsTransfer: ", $time,
             fshow(mRs), " ; ",

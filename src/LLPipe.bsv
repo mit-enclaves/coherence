@@ -42,6 +42,8 @@ export mkLLPipe;
 typedef struct {
     Addr addr;
     cRqIdxT mshrIdx;
+    /* childT child; */
+/* } LLPipeCRqIn#(type cRqIdxT, type childT) deriving(Bits, Eq, FShow); */
 } LLPipeCRqIn#(type cRqIdxT) deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -49,12 +51,14 @@ typedef struct {
     Msi toState; // come from req in MSHR (E or M)
     Line data; // come from memory must be valid
     wayT way; // come from MSHR
-} LLPipeMRsIn#(type wayT) deriving(Bits, Eq, FShow);
+    childT child;
+} LLPipeMRsIn#(type wayT, type childT) deriving(Bits, Eq, FShow);
 
 typedef union tagged {
+    /* LLPipeCRqIn#(cRqIdxT, childT) CRq; */
     LLPipeCRqIn#(cRqIdxT) CRq;
     CRsMsg#(childT) CRs;
-    LLPipeMRsIn#(wayT) MRs;
+    LLPipeMRsIn#(wayT, childT) MRs;
 } LLPipeIn#(
     type childT,
     type wayT,
@@ -109,6 +113,7 @@ typedef struct {
 } LLPipeMRsCmd#(type wayT) deriving(Bits, Eq, FShow);
 
 typedef union tagged {
+    /* LLPipeCRqIn#(cRqIdxT,childT) CRq; */
     LLPipeCRqIn#(cRqIdxT) CRq;
     LLPipeCRsCmd#(childT) CRs;
     LLPipeMRsCmd#(wayT) MRs;
@@ -121,6 +126,7 @@ typedef union tagged {
 typedef 6  LgDramRegionNum; // 64 regions
 typedef 64 DramRegionNum;
 typedef 25 LgDramRegionSz;  // 32MB regions
+
 
 module mkLLPipe(
     LLPipe#(lgBankNum, childNum, wayNum, indexT, tagT, cRqIdxT)
@@ -409,7 +415,7 @@ module mkLLPipe(
         Addr addr = getAddrFromCmd(pipe.first.cmd); // inherit addr
         Maybe#(pipeCmdT) newCmd = Invalid;
         if(swapRq matches tagged Valid .idx) begin
-            newCmd = Valid (CRq (LLPipeCRqIn {addr: addr, mshrIdx: idx}));
+            newCmd = Valid (CRq (LLPipeCRqIn {addr: addr, mshrIdx: idx})); 
         end
         // call pipe
         pipe.deqWrite(newCmd, wrRam, updateRep);

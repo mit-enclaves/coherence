@@ -193,6 +193,7 @@ endfunction
 //////////////////
 module mkLLCRqMshr#(
     function Addr getAddrFromReq(reqT r),
+    function Bit#(1) getChild(reqT r),
     function Bool needDownReq(dirPendT dirPend),
     dirPendT dirPendInitVal
 )(
@@ -236,14 +237,19 @@ module mkLLCRqMshr#(
     RegFile#(cRqIndexT, cRqIndexT) addrSuccFile <- mkRegFile(0, fromInteger(valueOf(cRqNum) - 1));
     RegFile#(cRqIndexT, cRqIndexT) repSuccFile <- mkRegFile(0, fromInteger(valueOf(cRqNum) - 1));
     // empty entry FIFO
-    Fifo#(cRqNum, cRqIndexT) emptyEntryQ <- mkCFFifo;
+    Fifo#(cRqNum, cRqIndexT) emptyEntryQ0 <- mkCFFifo;
+    Fifo#(cRqNum, cRqIndexT) emptyEntryQ1 <- mkCFFifo;
 
     // empty entry FIFO needs initialization
     Reg#(Bool) inited <- mkReg(False);
     Reg#(cRqIndexT) initIdx <- mkReg(0);
 
     rule initEmptyEntry(!inited);
-        emptyEntryQ.enq(initIdx);
+        if (initIdx[0] == 0) begin
+            emptyEntryQ0.enq(initIdx);
+        end else begin 
+            emptyEntryQ1.enq(initIdx);
+        end
         initIdx <= initIdx + 1;
         if(initIdx == fromInteger(valueOf(cRqNum) - 1)) begin
             inited <= True;
@@ -287,8 +293,15 @@ module mkLLCRqMshr#(
         endmethod
 
         method ActionValue#(cRqIndexT) getEmptyEntryInit(reqT r, Maybe#(Line) d) if(inited);
-            emptyEntryQ.deq;
-            cRqIndexT n = emptyEntryQ.first;
+            cRqIndexT n;
+            if (getChild(r) == 0 ) begin 
+                emptyEntryQ0.deq;
+                n = emptyEntryQ0.first;
+            end
+            else begin
+                emptyEntryQ1.deq;
+                n = emptyEntryQ1.first;
+            end
             reqVec[n][transfer_port] <= r;
             stateVec[n][transfer_port] <= Init;
             writeSlot(transfer_port, n, slotInitVal);
@@ -303,7 +316,12 @@ module mkLLCRqMshr#(
         endmethod
 
         method Bool hasEmptyEntry(reqT r);
-            return emptyEntryQ.notEmpty;
+            if (getChild(r) == 0 ) begin 
+                return emptyEntryQ0.notEmpty;
+            end
+            else begin
+                return emptyEntryQ1.notEmpty;
+            end
         endmethod
     endinterface
 
@@ -338,7 +356,12 @@ module mkLLCRqMshr#(
         endmethod
 
         method Action releaseEntry(cRqIndexT n) if(inited);
-            emptyEntryQ.enq(n);
+            if (n[0] == 0) begin
+                emptyEntryQ0.enq(n);
+            end 
+            else begin
+                emptyEntryQ1.enq(n);
+            end
             stateVec[n][sendRsToDmaC_port] <= Empty;
 `ifdef CHECK_DEADLOCK
             checker.releaseEntry(n);
