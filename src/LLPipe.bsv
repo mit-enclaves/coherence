@@ -173,27 +173,7 @@ module mkLLPipe(
     // Something to try:
     Vector#(DramRegionNum, Reg#(Tuple2#(Bit#(TLog#(indexSz)), indexT))) configRegionL2;
     for (Integer i = 0; i < valueof(DramRegionNum); i = i + 1) begin
-      if (i == 0) begin // SM
-        configRegionL2[i] <- mkReg(tuple2('h4, fromInteger(0)));
-      end 
-      else if (i == 1) begin // OS
-        configRegionL2[i] <- mkReg(tuple2('h4, fromInteger(16)));
-      end 
-      else if (i == 2) begin // OS
-        configRegionL2[i] <- mkReg(tuple2('h4, fromInteger(16 + 16)));
-      end 
-      else if (i == 3) begin // Enclave Region
-        configRegionL2[i] <- mkReg(tuple2('h9, fromInteger(16 + 16 + 16)));
-      end 
-      else if (i == 4) begin // Metadata Region
-        configRegionL2[i] <- mkReg(tuple2('h4, fromInteger(16 + 16 + 16 + 512)));
-      end 
-      else if (i == 5) begin // Shared Memory Region
-        configRegionL2[i] <- mkReg(tuple2('h7, fromInteger(16 + 16 + 16 + 512 + 16)));
-      end 
-      else begin
-        configRegionL2[i] <- mkReg(tuple2('h0, fromInteger(16 + 16 + 16 + 512 + 16 + 128 + ((i - 4) * 1))));
-      end 
+        configRegionL2[i] <- mkReg(tuple2('h4, fromInteger(i * 16)));
     end
 `endif // SECURITY
  
