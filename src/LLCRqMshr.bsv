@@ -244,6 +244,7 @@ module mkLLCRqMshr#(
     Reg#(Bool) inited <- mkReg(False);
     Reg#(cRqIndexT) initIdx <- mkReg(0);
 
+    // Divide MSHRs between cores. 
     rule initEmptyEntry(!inited);
         if (initIdx[0] == 0) begin
             emptyEntryQ0.enq(initIdx);

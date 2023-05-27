@@ -129,7 +129,8 @@ module mkLLBank#(
     // is all I when this function is called. fetchFromMem indicates whether
     // the data is just fetched from DRAM or not. Any function given here will
     // not affect correctness of coherence protocol.
-    function Bool respLoadWithE(Bool fetchFromMem)
+    function Bool respLoadWithE(Bool fetchFromMem),
+    function childT getTlbId(dmaRqIdT dmarid)
 )(
     LLBank#(lgBankNum, childNum, wayNum, indexSz, tagSz, cRqNum, cRqIdT, dmaRqIdT)
 ) provisos(
@@ -392,12 +393,13 @@ module mkLLBank#(
         rqFromDmaQ.deq;
         dmaRqT r = rqFromDmaQ.first;
         Bool write = r.byteEn != replicate(False);
+        childT cid = getTlbId(r.id);
         cRqT cRq = LLRq {
             addr: r.addr,
             fromState: I,
             toState: write ? M : S, // later on we use toState to distinguish DMA write vs. read
             canUpToE: False, // DMA should not go to E
-            child: ?,
+            child: cid,
             byteEn: r.byteEn,
             id: Dma (r.id)
         };
