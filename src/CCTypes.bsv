@@ -21,6 +21,7 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+`include "ProcConfig.bsv"
 import Types::*; // import from RISCY repo
 import MemoryTypes::*; // import from RISCY repo
 import Vector::*;
@@ -284,6 +285,39 @@ interface ParentCacheToChild#(type cRqIdT, type childT);
     interface FifoEnq#(CRqMsg#(cRqIdT, childT)) rqFromC;
     interface FifoDeq#(PRqRsMsg#(cRqIdT, childT)) toC;
 endinterface
+
+`ifdef SECURITY
+// We rotate the addr in/out LLC to achieve set partition
+
+typedef 0 LgLLBankNum;
+
+`ifdef SIM_LOG_LLC_PARTITION_NUM
+typedef `SIM_LOG_LLC_PARTITION_NUM LgLLCPartitionNum;
+`else
+typedef `LOG_DRAM_REGION_NUM LgLLCPartitionNum;
+`endif
+typedef `LOG_DRAM_REGION_SIZE LgDramRegionSz;
+typedef TExp#(LgLLCPartitionNum) DramRegionNum;
+typedef TAdd#(LgLLBankNum, LgLineSzBytes) LLBankOffsetSz;
+
+typedef Bit#(LgLLCPartitionNum) RegionId;
+
+typedef struct{
+    Bit#(indexSz) base;
+    Bit#(TLog#(indexSz)) size;
+} RegionConfig#(numeric type indexSz) deriving(Bits, Eq, FShow);
+
+typedef struct{
+    RegionId rid;
+    RegionConfig#(indexSz) rconfig;
+} MMIOLLCCtrlReq#(numeric type indexSz) deriving(Bits, Eq, FShow);
+
+interface LLCPtControl#(numeric type indexSz);
+    method Action changePartitioning(MMIOLLCCtrlReq#(indexSz) req);
+endinterface
+
+
+`endif // SECURITY
 
 // unified child req & dma req
 typedef union tagged {

@@ -89,6 +89,7 @@ interface LLBank#(
     // performance
     method Action setPerfStatus(Bool stats);
     method Data getPerfData(LLCPerfType t);
+    interface LLCPtControl#(indexSz) llc_ctrl;
 endinterface
 
 typedef struct {
@@ -124,7 +125,7 @@ typedef enum {Child, Dma} LLCRqSrc deriving(Bits, Eq, FShow);
 
 module mkLLBank#(
     module#(LLCRqMshr#(cRqNum, wayT, tagT, Vector#(childNum, DirPend), cRqT)) mkLLMshr,
-    module#(LLPipe#(lgBankNum, childNum, wayNum, indexT, tagT, cRqIndexT)) mkLLPipeline,
+    module#(LLPipe#(lgBankNum, childNum, wayNum, indexT, tagT, cRqIndexT, indexSz)) mkLLPipeline,
     // Whether we resp a load request (to S) with E permission. The directory
     // is all I when this function is called. fetchFromMem indicates whether
     // the data is just fetched from DRAM or not. Any function given here will
@@ -168,7 +169,7 @@ module mkLLBank#(
 
     LLCRqMshr#(cRqNum, wayT, tagT, Vector#(childNum, DirPend), cRqT) cRqMshr <- mkLLMshr;
 
-    LLPipe#(lgBankNum, childNum, wayNum, indexT, tagT, cRqIndexT) pipeline <- mkLLPipeline;
+    LLPipe#(lgBankNum, childNum, wayNum, indexT, tagT, cRqIndexT, indexSz) pipeline <- mkLLPipeline;
 
     Fifo#(2, cRqFromCT) rqFromCQ <- mkCFFifo;
     Fifo#(2, cRsFromCT) rsFromCQ <- mkCFFifo;
@@ -1496,6 +1497,12 @@ module mkLLBank#(
             default: 0;
         endcase);
     endmethod
+
+    interface  LLCPtControl llc_ctrl;
+        method Action changePartitioning(MMIOLLCCtrlReq#(indexSz) req);
+            pipeline.changePartitioning(req.rid, req.rconfig);
+        endmethod
+    endinterface
 endmodule
 
 // Scheduling notes

@@ -78,7 +78,8 @@ interface LLPipe#(
     numeric type wayNum,
     type indexT,
     type tagT,
-    type cRqIdxT
+    type cRqIdxT,
+    numeric type indexSz
 );
     method Action send(LLPipeIn#(Bit#(TLog#(childNum)), Bit#(TLog#(wayNum)), cRqIdxT) r);
     method Bool notEmpty;
@@ -99,6 +100,7 @@ interface LLPipe#(
         RamData#(tagT, Msi, Vector#(childNum, Msi), Maybe#(CRqOwner#(cRqIdxT)), void, Line) wrRam, // always write BRAM
         Bool updateRep
     );
+    method Action changePartitioning(RegionId rid, RegionConfig#(indexSz) rconfig);
 endinterface
 
 // real cmd used in pipeline
@@ -122,14 +124,9 @@ typedef union tagged {
     type wayT,
     type cRqIdxT
 ) deriving (Bits, Eq, FShow);
-    
-typedef 6  LgDramRegionNum; // 64 regions
-typedef 64 DramRegionNum;
-typedef 25 LgDramRegionSz;  // 32MB regions
-
 
 module mkLLPipe(
-    LLPipe#(lgBankNum, childNum, wayNum, indexT, tagT, cRqIdxT)
+    LLPipe#(lgBankNum, childNum, wayNum, indexT, tagT, cRqIdxT, indexSz)
 ) provisos(
     Alias#(childT, Bit#(TLog#(childNum))),
     Alias#(wayT, Bit#(TLog#(wayNum))),
@@ -155,6 +152,9 @@ module mkLLPipe(
     Add#(indexSz, a__, AddrSz),
     Add#(tagSz, b__, AddrSz)
 );
+
+    Bool verbose = True;
+
     // RAMs
     Vector#(wayNum, RWBramCore#(indexT, infoT)) infoRam <- replicateM(mkRWBramCore);
     RWBramCore#(dataIndexT, Line) dataRam <- mkRWBramCore;
@@ -168,13 +168,12 @@ module mkLLPipe(
     Reg#(indexT) initIndex <- mkReg(0);
 
 `ifdef SECURITY
-    //Vector#(DramRegionNum, Reg#(Tuple2#(Bit#(TLog#(indexSz)), indexT))) configRegionL2 <-replicateM(mkReg(0));
     
-    // Something to try:
-    Vector#(DramRegionNum, Reg#(Tuple2#(Bit#(TLog#(indexSz)), indexT))) configRegionL2;
+    Vector#(DramRegionNum, Reg#(RegionConfig#(indexSz))) configRegionLLC;
     for (Integer i = 0; i < valueof(DramRegionNum); i = i + 1) begin
-        configRegionL2[i] <- mkReg(tuple2('h4, fromInteger(i * 16)));
+        configRegionLLC[i] <- mkReg(RegionConfig{base:fromInteger(i * 16), size:'h4});
     end
+
 `endif // SECURITY
  
     rule doInit(!initDone);
@@ -208,11 +207,11 @@ module mkLLPipe(
         Addr addr = getAddrFromCmd(cmd);
         indexT index = truncate(addr >> (valueOf(LgLineSzBytes) + valueOf(lgBankNum)));
     `ifdef SECURITY
-        // Get the DRAM region ID and get the L2 slice base and bound for the corresponding DRAM region
-        Bit#(LgDramRegionNum) region = truncate(addr >> valueOf(LgDramRegionSz));
-        let cR = configRegionL2[region];
-        let log_size = tpl_1(cR);
-        let base = tpl_2(cR);
+        // Get the DRAM region ID and get the LLC slice base and bound for the corresponding DRAM region
+        Bit#(LgLLCPartitionNum) region = truncate(addr >> valueOf(LgDramRegionSz));
+        let cR = configRegionLLC[region];
+        let log_size = cR.size;
+        let base = cR.base;
 
         indexT mask = -1 >> (fromInteger(valueOf(indexSz)) - log_size);
         index = (index & mask) + base;
@@ -400,4 +399,13 @@ module mkLLPipe(
         // call pipe
         pipe.deqWrite(newCmd, wrRam, updateRep);
     endmethod
+
+    method Action changePartitioning(RegionId rid, RegionConfig#(indexSz) rconfig);
+        configRegionLLC[rid] <= rconfig;
+        if(verbose) begin
+                $display("[LLPipe] changePartitioning",
+                fshow(rid), "; old config : ", fshow(configRegionLLC[rid]), "; new config :", fshow(rconfig));
+            end
+    endmethod
+
 endmodule

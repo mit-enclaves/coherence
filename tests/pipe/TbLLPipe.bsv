@@ -27,6 +27,6 @@ import CCSizes::*;
 
 (* synthesize *)
 module mkTbLLPipe(Empty);
-    LLPipe#(LgLLBankNum, LLChildNum, LLWayNum, LLIndex, LLTag, LLCRqMshrIdx) m <- mkLLPipe;
+    LLPipe#(LgLLBankNum, LLChildNum, LLWayNum, LLIndex, LLTag, LLCRqMshrIdx, indexSz) m <- mkLLPipe;
 endmodule
 

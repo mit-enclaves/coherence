@@ -43,7 +43,7 @@ endmodule
 
 (* synthesize *)
 module mkLLPipeline(
-    LLPipe#(LgLLBankNum, LLChildNum, LLWayNum, LLIndex, LLTag, LLCRqMshrIdx)
+    LLPipe#(LgLLBankNum, LLChildNum, LLWayNum, LLIndex, LLTag, LLCRqMshrIdx, indexSz)
 );
     let m <- mkLLPipe;
     return m;
