@@ -27,7 +27,7 @@ import Types::*;
 import CCTypes::*;
 import CCPipe::*;
 import RWBramCore::*;
-import RandomReplace::*;
+import LruReplace::*;
 
 export LLPipeCRqIn(..);
 export LLPipeMRsIn(..);
@@ -86,13 +86,13 @@ interface LLPipe#(
     method PipeOut#(
         Bit#(TLog#(wayNum)),
         tagT, Msi, Vector#(childNum, Msi),
-        Maybe#(CRqOwner#(cRqIdxT)), void, RandRepInfo, // no other
+        Maybe#(CRqOwner#(cRqIdxT)), void, TrueLruRepInfo#(wayNum), // no other
         Line, LLCmd#(Bit#(TLog#(childNum)), cRqIdxT)
     ) first;
     method PipeOut#(
         Bit#(TLog#(wayNum)),
         tagT, Msi, Vector#(childNum, Msi),
-        Maybe#(CRqOwner#(cRqIdxT)), void, RandRepInfo, // no other
+        Maybe#(CRqOwner#(cRqIdxT)), void, TrueLruRepInfo#(wayNum), // no other
         Line, LLCmd#(Bit#(TLog#(childNum)), cRqIdxT)
     ) unguard_first;
     method Action deqWrite(
@@ -133,7 +133,7 @@ module mkLLPipe(
     Alias#(dirT, Vector#(childNum, Msi)),
     Alias#(ownerT, Maybe#(CRqOwner#(cRqIdxT))),
     Alias#(otherT, void), // no other cache info
-    Alias#(repT, RandRepInfo), // use random replace
+    Alias#(repT, TrueLruRepInfo#(wayNum)), // use random replace
     Alias#(pipeInT, LLPipeIn#(childT, wayT, cRqIdxT)),
     Alias#(pipeCmdT, LLPipeCmd#(childT, wayT, cRqIdxT)),
     Alias#(llCmdT, LLCmd#(childT, cRqIdxT)),
@@ -150,7 +150,8 @@ module mkLLPipe(
     Alias#(tagT, Bit#(tagSz)),
     Alias#(cRqIdxT, Bit#(_cRqIdxSz)),
     Add#(indexSz, a__, AddrSz),
-    Add#(tagSz, b__, AddrSz)
+    Add#(tagSz, b__, AddrSz),
+    Add#(1, c__, wayNum)
 );
 
     Bool verbose = True;
@@ -160,8 +161,8 @@ module mkLLPipe(
     RWBramCore#(dataIndexT, Line) dataRam <- mkRWBramCore;
     
     // random replacement
-    RWBramCore#(indexT, repT) repRam <- mkRandRepRam;
-    ReplacePolicy#(wayNum, RandRepInfo) repPolicy <- mkRandomReplace;
+    RWBramCore#(indexT, repT) repRam <- mkRWBramCore;
+    ReplacePolicy#(wayNum, TrueLruRepInfo#(wayNum)) repPolicy <- mkTrueLruReplace;
 
     // initialize RAM
     Reg#(Bool) initDone <- mkReg(False);

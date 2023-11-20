@@ -37,7 +37,7 @@ import Performance::*;
 import LatencyTimer::*;
 import Cntrs::*;
 import ConfigReg::*;
-import RandomReplace::*;
+import LruReplace::*;
 
 export LLCRqStuck(..);
 export LLBank(..);
@@ -156,7 +156,7 @@ module mkLLBank#(
     Alias#(cRqT, LLRq#(cRqIdT, dmaRqIdT, childT)),
     Alias#(cRqSlotT, LLCRqSlot#(wayT, tagT, Vector#(childNum, DirPend))), // cRq MSHR slot
     Alias#(llCmdT, LLCmd#(childT, cRqIndexT)),
-    Alias#(pipeOutT, PipeOut#(wayT, tagT, Msi, dirT, cacheOwnerT, void, RandRepInfo, Line, llCmdT)),
+    Alias#(pipeOutT, PipeOut#(wayT, tagT, Msi, dirT, cacheOwnerT, void, TrueLruRepInfo#(wayNum), Line, llCmdT)),
     // requirements
     Bits#(cRqIdT, _cRqIdSz),
     Bits#(dmaRqIdT, _dmaRqIdSz),
