@@ -27,7 +27,7 @@ import Types::*;
 import CCTypes::*;
 import CCPipe::*;
 import RWBramCore::*;
-import RandomReplace::*;
+import LruReplace::*;
 
 export LLPipeCRqIn(..);
 export LLPipeMRsIn(..);
@@ -78,20 +78,21 @@ interface LLPipe#(
     numeric type wayNum,
     type indexT,
     type tagT,
-    type cRqIdxT
+    type cRqIdxT,
+    numeric type indexSz
 );
     method Action send(LLPipeIn#(Bit#(TLog#(childNum)), Bit#(TLog#(wayNum)), cRqIdxT) r);
     method Bool notEmpty;
     method PipeOut#(
         Bit#(TLog#(wayNum)),
         tagT, Msi, Vector#(childNum, Msi),
-        Maybe#(CRqOwner#(cRqIdxT)), void, RandRepInfo, // no other
+        Maybe#(CRqOwner#(cRqIdxT)), void, TrueLruRepInfo#(wayNum), // no other
         Line, LLCmd#(Bit#(TLog#(childNum)), cRqIdxT)
     ) first;
     method PipeOut#(
         Bit#(TLog#(wayNum)),
         tagT, Msi, Vector#(childNum, Msi),
-        Maybe#(CRqOwner#(cRqIdxT)), void, RandRepInfo, // no other
+        Maybe#(CRqOwner#(cRqIdxT)), void, TrueLruRepInfo#(wayNum), // no other
         Line, LLCmd#(Bit#(TLog#(childNum)), cRqIdxT)
     ) unguard_first;
     method Action deqWrite(
@@ -99,6 +100,7 @@ interface LLPipe#(
         RamData#(tagT, Msi, Vector#(childNum, Msi), Maybe#(CRqOwner#(cRqIdxT)), void, Line) wrRam, // always write BRAM
         Bool updateRep
     );
+    method Action changePartitioning(RegionId rid, RegionConfig#(indexSz) rconfig);
 endinterface
 
 // real cmd used in pipeline
@@ -122,21 +124,16 @@ typedef union tagged {
     type wayT,
     type cRqIdxT
 ) deriving (Bits, Eq, FShow);
-    
-typedef 6  LgDramRegionNum; // 64 regions
-typedef 64 DramRegionNum;
-typedef 25 LgDramRegionSz;  // 32MB regions
-
 
 module mkLLPipe(
-    LLPipe#(lgBankNum, childNum, wayNum, indexT, tagT, cRqIdxT)
+    LLPipe#(lgBankNum, childNum, wayNum, indexT, tagT, cRqIdxT, indexSz)
 ) provisos(
     Alias#(childT, Bit#(TLog#(childNum))),
     Alias#(wayT, Bit#(TLog#(wayNum))),
     Alias#(dirT, Vector#(childNum, Msi)),
     Alias#(ownerT, Maybe#(CRqOwner#(cRqIdxT))),
     Alias#(otherT, void), // no other cache info
-    Alias#(repT, RandRepInfo), // use random replace
+    Alias#(repT, TrueLruRepInfo#(wayNum)), // use random replace
     Alias#(pipeInT, LLPipeIn#(childT, wayT, cRqIdxT)),
     Alias#(pipeCmdT, LLPipeCmd#(childT, wayT, cRqIdxT)),
     Alias#(llCmdT, LLCmd#(childT, cRqIdxT)),
@@ -153,48 +150,31 @@ module mkLLPipe(
     Alias#(tagT, Bit#(tagSz)),
     Alias#(cRqIdxT, Bit#(_cRqIdxSz)),
     Add#(indexSz, a__, AddrSz),
-    Add#(tagSz, b__, AddrSz)
+    Add#(tagSz, b__, AddrSz),
+    Add#(1, c__, wayNum)
 );
+
+    Bool verbose = True;
+
     // RAMs
     Vector#(wayNum, RWBramCore#(indexT, infoT)) infoRam <- replicateM(mkRWBramCore);
     RWBramCore#(dataIndexT, Line) dataRam <- mkRWBramCore;
     
     // random replacement
-    RWBramCore#(indexT, repT) repRam <- mkRandRepRam;
-    ReplacePolicy#(wayNum, RandRepInfo) repPolicy <- mkRandomReplace;
+    RWBramCore#(indexT, repT) repRam <- mkRWBramCore;
+    ReplacePolicy#(wayNum, TrueLruRepInfo#(wayNum)) repPolicy <- mkTrueLruReplace;
 
     // initialize RAM
     Reg#(Bool) initDone <- mkReg(False);
     Reg#(indexT) initIndex <- mkReg(0);
 
 `ifdef SECURITY
-    //Vector#(DramRegionNum, Reg#(Tuple2#(Bit#(TLog#(indexSz)), indexT))) configRegionL2 <-replicateM(mkReg(0));
     
-    // Something to try:
-    Vector#(DramRegionNum, Reg#(Tuple2#(Bit#(TLog#(indexSz)), indexT))) configRegionL2;
+    Vector#(DramRegionNum, Reg#(RegionConfig#(indexSz))) configRegionLLC;
     for (Integer i = 0; i < valueof(DramRegionNum); i = i + 1) begin
-      if (i == 0) begin // SM
-        configRegionL2[i] <- mkReg(tuple2('h4, fromInteger(0)));
-      end 
-      else if (i == 1) begin // OS
-        configRegionL2[i] <- mkReg(tuple2('h4, fromInteger(16)));
-      end 
-      else if (i == 2) begin // OS
-        configRegionL2[i] <- mkReg(tuple2('h4, fromInteger(16 + 16)));
-      end 
-      else if (i == 3) begin // Enclave Region
-        configRegionL2[i] <- mkReg(tuple2('h9, fromInteger(16 + 16 + 16)));
-      end 
-      else if (i == 4) begin // Metadata Region
-        configRegionL2[i] <- mkReg(tuple2('h4, fromInteger(16 + 16 + 16 + 512)));
-      end 
-      else if (i == 5) begin // Shared Memory Region
-        configRegionL2[i] <- mkReg(tuple2('h7, fromInteger(16 + 16 + 16 + 512 + 16)));
-      end 
-      else begin
-        configRegionL2[i] <- mkReg(tuple2('h0, fromInteger(16 + 16 + 16 + 512 + 16 + 128 + ((i - 4) * 1))));
-      end 
+        configRegionLLC[i] <- mkReg(RegionConfig{base:fromInteger(i * 16), size:'h4});
     end
+
 `endif // SECURITY
  
     rule doInit(!initDone);
@@ -228,11 +208,11 @@ module mkLLPipe(
         Addr addr = getAddrFromCmd(cmd);
         indexT index = truncate(addr >> (valueOf(LgLineSzBytes) + valueOf(lgBankNum)));
     `ifdef SECURITY
-        // Get the DRAM region ID and get the L2 slice base and bound for the corresponding DRAM region
-        Bit#(LgDramRegionNum) region = truncate(addr >> valueOf(LgDramRegionSz));
-        let cR = configRegionL2[region];
-        let log_size = tpl_1(cR);
-        let base = tpl_2(cR);
+        // Get the DRAM region ID and get the LLC slice base and bound for the corresponding DRAM region
+        Bit#(LgLLCPartitionNum) region = truncate(addr >> valueOf(LgDramRegionSz));
+        let cR = configRegionLLC[region];
+        let log_size = cR.size;
+        let base = cR.base;
 
         indexT mask = -1 >> (fromInteger(valueOf(indexSz)) - log_size);
         index = (index & mask) + base;
@@ -420,4 +400,13 @@ module mkLLPipe(
         // call pipe
         pipe.deqWrite(newCmd, wrRam, updateRep);
     endmethod
+
+    method Action changePartitioning(RegionId rid, RegionConfig#(indexSz) rconfig);
+        configRegionLLC[rid] <= rconfig;
+        if(verbose) begin
+                $display("[LLPipe] changePartitioning",
+                fshow(rid), "; old config : ", fshow(configRegionLLC[rid]), "; new config :", fshow(rconfig));
+            end
+    endmethod
+
 endmodule
