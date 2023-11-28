@@ -207,16 +207,6 @@ module mkLLPipe(
     function indexT getIndex(pipeCmdT cmd);
         Addr addr = getAddrFromCmd(cmd);
         indexT index = truncate(addr >> (valueOf(LgLineSzBytes) + valueOf(lgBankNum)));
-    `ifdef SECURITY
-        // Get the DRAM region ID and get the LLC slice base and bound for the corresponding DRAM region
-        Bit#(LgLLCPartitionNum) region = truncate(addr >> valueOf(LgDramRegionSz));
-        let cR = configRegionLLC[region];
-        let log_size = cR.size;
-        let base = cR.base;
-
-        indexT mask = -1 >> (fromInteger(valueOf(indexSz)) - log_size);
-        index = (index & mask) + base;
-    `endif // SECURITY
         return index;
 
     endfunction
