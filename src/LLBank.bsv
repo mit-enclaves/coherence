@@ -542,7 +542,7 @@ module mkLLBank#(
         // take actions according to type
         if(t == Ld) begin
             // only load mem: can be child or dma req
-            // child rq needs refill cache line, dma rq only do of they are a Shared Memory access
+            // child rq needs refill cache line, dma rq only do so if they are a Shared Memory access
             function Bool isRefillRequest(LLRqId#(cRqIdT, dmaRqIdT) id);
                 return (case (id) matches
                     tagged Child ._: True;
@@ -1281,7 +1281,7 @@ module mkLLBank#(
                     end
                     else begin
                         // miss in LLC, so req mem and req is done!
-                        if (cRq.id matches tagged Dma .dmaId &&& isSharedMem(dmaId)) begin
+                        if (cRq.id matches tagged Dma .dmaId &&& isSharedMem(dmaId) &&& cRq.toState != M) begin // If it's a load from Shared memory, we need to get the value from memory first.
                             if(ram.info.cs == I) begin
                                 $display("%t LL %m pipelineResp: cRq from dma SharedMem: no owner, miss no replace: ", $time,
                                     fshow(dirPend)
