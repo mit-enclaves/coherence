@@ -131,7 +131,8 @@ module mkLLBank#(
     // the data is just fetched from DRAM or not. Any function given here will
     // not affect correctness of coherence protocol.
     function Bool respLoadWithE(Bool fetchFromMem),
-    function childT getTlbId(dmaRqIdT dmarid)
+    function childT getTlbId(dmaRqIdT dmarid),
+    function Bool isSharedMem(dmaRqIdT dmarid)
 )(
     LLBank#(lgBankNum, childNum, wayNum, indexSz, tagSz, cRqNum, cRqIdT, dmaRqIdT)
 ) provisos(
@@ -487,7 +488,7 @@ module mkLLBank#(
         // get correspond cRq & slot
         cRqT cRq = cRqMshr.transfer.getRq(n);
         cRqSlotT cSlot = cRqMshr.transfer.getSlot(n);
-        doAssert(isRqFromC(cRq.id), "refill mem resp must be for child req");
+        //doAssert(isRqFromC(cRq.id) || cRq.id matches tagged ShrMem ._, "refill mem resp must be for child req or a shared memory access");
         // send to pipeline
         pipeline.send(MRs (LLPipeMRsIn {
             addr: cRq.addr,
@@ -541,12 +542,21 @@ module mkLLBank#(
         // take actions according to type
         if(t == Ld) begin
             // only load mem: can be child or dma req
+            // child rq needs refill cache line, dma rq only do so if they are a Shared Memory access
+            function Bool isRefillRequest(LLRqId#(cRqIdT, dmaRqIdT) id);
+                return (case (id) matches
+                    tagged Child ._: True;
+                    tagged Dma .dmaId:
+                        return isSharedMem(dmaId);
+                    default: False;
+                endcase);
+            endfunction
+
             toMemT msg = Ld (LdMemRq {
                 addr: cRq.addr,
                 child: ?,
                 id: LdMemRqId {
-                    // child rq needs refill cache line, dma rq does not
-                    refill: isRqFromC(cRq.id),
+                    refill: isRefillRequest(cRq.id),
                     mshrIdx: n
                 }
             });
@@ -944,10 +954,9 @@ module mkLLBank#(
     endaction
     endfunction
 
-    // function to directly evict a cache line by a cRq from child (replacement)
-    function Action cRqFromCEvict(cRqIndexT n, cRqT cRq, Maybe#(cRqIndexT) repSucc);
+    // function to directly evict a cache line by a cRq (replacement)
+    function Action cRqFromEvict(cRqIndexT n, cRqT cRq, Maybe#(cRqIndexT) repSucc);
     action
-        doAssert(isRqFromC(cRq.id), "only cRq from child can evict a line");
         doAssert(ram.info.dir == replicate(I) && ram.info.cs > I,
             "only evict valid line which has no children"
         );
@@ -1032,10 +1041,9 @@ module mkLLBank#(
             return map(initPend, idxVec);
         endfunction
 
-        // function to process cRq from child miss without replacement (MSHR slot may have garbage)
-        function Action cRqFromCMissNoReplacement(Vector#(childNum, DirPend) dirPend);
+        // function to process cRq miss without replacement (MSHR slot may have garbage)
+        function Action cRqFromMissNoReplacement(Vector#(childNum, DirPend) dirPend);
         action
-            doAssert(isRqFromC(cRq.id), "should be cRq from child");
             // it is impossible in LLC to have slot.waitP == True in this function
             // because there is no pRq in LLC to interrupt a cRq
             cRqSlotT cSlot = pipeOutCSlot;
@@ -1101,16 +1109,15 @@ module mkLLBank#(
         endaction
         endfunction
 
-        // function to do replacement for cRq from child
-        function Action cRqFromCReplacement(Vector#(childNum, DirPend) dirPend);
+        // function to do replacement for cRq
+        function Action cRqFromReplacement(Vector#(childNum, DirPend) dirPend);
         action
-            doAssert(isRqFromC(cRq.id), "should be cRq from child");
             if(dirPend == replicate(Invalid)) begin
                 // directly evict the line
                 // this cRq cannot have repSucc, since it has not occupied the line
                 Maybe#(cRqIndexT) repSucc = pipeOutRepSucc;
                 doAssert(!isValid(repSucc), "cannot have rep succ");
-                cRqFromCEvict(n, cRq, Invalid);
+                cRqFromEvict(n, cRq, Invalid);
             end
             else begin
                 // wait child to downgrade
@@ -1200,7 +1207,7 @@ module mkLLBank#(
                         $display("%t LL %m pipelineResp: cRq from child: own by itself, miss no replace: ", $time,
                             fshow(dirPend)
                         );
-                        cRqFromCMissNoReplacement(dirPend);
+                        cRqFromMissNoReplacement(dirPend);
                     end
                 end
                 else begin
@@ -1248,7 +1255,7 @@ module mkLLBank#(
                             $display("%t LL %m pipelineResp: cRq: no owner, miss no replace: ", $time,
                                 fshow(dirPend)
                             );
-                            cRqFromCMissNoReplacement(dirPend);
+                            cRqFromMissNoReplacement(dirPend);
                         end
                     end
                     else begin
@@ -1257,7 +1264,7 @@ module mkLLBank#(
                         $display("%t LL %m pipelineResp: cRq: no owner, replace: ", $time,
                             fshow(dirPend)
                         );
-                        cRqFromCReplacement(dirPend);
+                        cRqFromReplacement(dirPend);
                     end
                 end
                 else begin
@@ -1274,22 +1281,38 @@ module mkLLBank#(
                     end
                     else begin
                         // miss in LLC, so req mem and req is done!
-                        $display("%t LL %m pipelineResp: cRq from dma: no owner, miss req mem", $time);
-                        toMInfoQ.enq(ToMemInfo {
-                            mshrIdx: n,
-                            t: cRq.toState == M ? DmaWr : Ld
-                        });
-                        // set req to Done & deq pipeline (no change to ram)
-                        cRqMshr.pipelineResp.setStateSlot(n, Done, ?);
-                        pipeline.deqWrite(Invalid, pipeOut.ram, False);
-                        // retry successor (cannot swap in since we don't have a line to occupy)
-                        Maybe#(cRqIndexT) addrSucc = pipeOutAddrSucc;
-                        if(addrSucc matches tagged Valid .m) begin
-                            cRqRetryIndexQ.enq(m);
+                        if (cRq.id matches tagged Dma .dmaId &&& isSharedMem(dmaId) &&& cRq.toState != M) begin // If it's a load from Shared memory, we need to get the value from memory first.
+                            if(ram.info.cs == I) begin
+                                $display("%t LL %m pipelineResp: cRq from dma SharedMem: no owner, miss no replace: ", $time,
+                                    fshow(dirPend)
+                                );
+                                cRqFromMissNoReplacement(dirPend);
+                            end
+                            else begin
+                                $display("%t LL %m pipelineResp: cRq from dma SharedMem: no owner, replace: ", $time,
+                                fshow(dirPend)
+                                );
+                                cRqFromReplacement(dirPend);
+                            end
                         end
-                        // since we haven't occupied any line, we cannot have repSucc)
-                        Maybe#(cRqIndexT) repSucc = pipeOutRepSucc;
-                        doAssert(!isValid(repSucc), "should not have any rep succ");
+                        else begin
+                            $display("%t LL %m pipelineResp: cRq from dma: no owner, miss req mem", $time);
+                            toMInfoQ.enq(ToMemInfo {
+                                mshrIdx: n,
+                                t: cRq.toState == M ? DmaWr : Ld
+                            });
+                            // set req to Done & deq pipeline (no change to ram)
+                            cRqMshr.pipelineResp.setStateSlot(n, Done, ?);
+                            pipeline.deqWrite(Invalid, pipeOut.ram, False);
+                            // retry successor (cannot swap in since we don't have a line to occupy)
+                            Maybe#(cRqIndexT) addrSucc = pipeOutAddrSucc;
+                            if(addrSucc matches tagged Valid .m) begin
+                                cRqRetryIndexQ.enq(m);
+                            end
+                            // since we haven't occupied any line, we cannot have repSucc)
+                            Maybe#(cRqIndexT) repSucc = pipeOutRepSucc;
+                            doAssert(!isValid(repSucc), "should not have any rep succ");
+                        end
                     end
                 end
             end
@@ -1309,7 +1332,6 @@ module mkLLBank#(
             fshow(cRq), " ; ",
             fshow(cSlot)
         );
-        doAssert(isRqFromC(cRq.id), "only child req gets mem resp that refills the cache");
         doAssert(ram.info.cs >= cRq.toState && ram.info.tag == getTag(cRq.addr),
             "mRs must be tag match & have enough cs"
         );
@@ -1321,7 +1343,15 @@ module mkLLBank#(
             "cRq that needs mRs should not have children to wait for"
         );
         // cRq hits since all children are I
-        cRqFromCHit(cOwner.mshrIdx, cRq, True);
+        if(isRqFromC(cRq.id)) begin
+            cRqFromCHit(cOwner.mshrIdx, cRq, True);
+        end
+        else if (cRq.id matches tagged Dma .dmaId &&& isSharedMem(dmaId)) begin
+            cRqFromDmaHit(cOwner.mshrIdx, cRq);
+        end
+        else begin
+            doAssert(False, "only child requests or DMA shared memory access gets mem resp that refills the cache");
+        end
     endrule
 
     // handle cRs
@@ -1360,7 +1390,7 @@ module mkLLBank#(
                 if(newDirPend == replicate(Invalid)) begin
                     // replacement done, evict line
                     Maybe#(cRqIndexT) repSucc = pipeOutRepSucc;
-                    cRqFromCEvict(cOwner.mshrIdx, cRq, repSucc);
+                    cRqFromEvict(cOwner.mshrIdx, cRq, repSucc);
                     $display("%t LL %m pipelineResp: cRs: match cRq: replace done: ", $time,
                         fshow(repSucc)
                     );
