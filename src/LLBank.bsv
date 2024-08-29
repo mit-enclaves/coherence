@@ -1041,10 +1041,9 @@ module mkLLBank#(
             return map(initPend, idxVec);
         endfunction
 
-        // function to process cRq from child miss without replacement (MSHR slot may have garbage)
-        function Action cRqFromCMissNoReplacement(Vector#(childNum, DirPend) dirPend);
+        // function to process cRq miss without replacement (MSHR slot may have garbage)
+        function Action cRqFromMissNoReplacement(Vector#(childNum, DirPend) dirPend);
         action
-            doAssert(isRqFromC(cRq.id), "should be cRq from child");
             // it is impossible in LLC to have slot.waitP == True in this function
             // because there is no pRq in LLC to interrupt a cRq
             cRqSlotT cSlot = pipeOutCSlot;
@@ -1208,7 +1207,7 @@ module mkLLBank#(
                         $display("%t LL %m pipelineResp: cRq from child: own by itself, miss no replace: ", $time,
                             fshow(dirPend)
                         );
-                        cRqFromCMissNoReplacement(dirPend);
+                        cRqFromMissNoReplacement(dirPend);
                     end
                 end
                 else begin
@@ -1256,7 +1255,7 @@ module mkLLBank#(
                             $display("%t LL %m pipelineResp: cRq: no owner, miss no replace: ", $time,
                                 fshow(dirPend)
                             );
-                            cRqFromCMissNoReplacement(dirPend);
+                            cRqFromMissNoReplacement(dirPend);
                         end
                     end
                     else begin
@@ -1283,10 +1282,18 @@ module mkLLBank#(
                     else begin
                         // miss in LLC, so req mem and req is done!
                         if (cRq.id matches tagged Dma .dmaId &&& isSharedMem(dmaId)) begin
-                            $display("%t LL %m pipelineResp: cRq from dma SharedMem: no owner, replace: ", $time,
-                            fshow(dirPend)
-                            );
-                            cRqFromReplacement(dirPend);
+                            if(ram.info.cs == I) begin
+                                $display("%t LL %m pipelineResp: cRq from dma SharedMem: no owner, miss no replace: ", $time,
+                                    fshow(dirPend)
+                                );
+                                cRqFromMissNoReplacement(dirPend);
+                            end
+                            else begin
+                                $display("%t LL %m pipelineResp: cRq from dma SharedMem: no owner, replace: ", $time,
+                                fshow(dirPend)
+                                );
+                                cRqFromReplacement(dirPend);
+                            end
                         end
                         else begin
                             $display("%t LL %m pipelineResp: cRq from dma: no owner, miss req mem", $time);
